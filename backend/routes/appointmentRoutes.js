@@ -50,6 +50,20 @@ router.get('/doctor', async (req, res) => {
     res.status(500).send('Server error');
   }
 });
+// GET /api/appointments/patient/:patientId/accepted
+router.get('/patient/:patientId/accepted', async (req, res) => {
+  try {
+    const appointments = await Appointment.find({
+      patientId: req.params.patientId,
+      status: 'Accepted',
+    }).populate('doctorId', 'name speciality'); // optional: populate doctor info
+
+    res.json(appointments);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: 'Failed to fetch accepted appointments' });
+  }
+});
 
 
 export default router;

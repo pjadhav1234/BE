@@ -8,14 +8,20 @@ const JoinConsultation = () => {
   const user = JSON.parse(localStorage.getItem('user'));
 
   useEffect(() => {
-    const fetchAcceptedAppointments = async () => {
-      try {
-        const res = await axios.get(`http://localhost:5000/api/appointments/doctor`);
-        setAppointments(res.data); // Make sure this returns an array
-      } catch (err) {
-        console.error('Error fetching accepted appointments:', err);
-      }
-    };
+    useEffect(() => {
+  const fetchAcceptedAppointments = async () => {
+    try {
+      const res = await axios.get(`http://localhost:5000/api/appointments/patient/accepted`);
+      setAppointments(res.data); // Only accepted appointments
+    } catch (err) {
+      console.error('Error fetching accepted appointments:', err);
+    }
+  };
+
+  if (user?.role === 'patient') {
+    fetchAcceptedAppointments();
+  }
+}, [user]);
 
     if (user?.role === 'patient') {
       fetchAcceptedAppointments();
