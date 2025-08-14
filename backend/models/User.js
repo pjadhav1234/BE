@@ -7,7 +7,13 @@ const userSchema = new mongoose.Schema({
   age: { type: Number, required: true },
   email: { type: String, required: true, unique: true },
   password: { type: String, required: true },
+  specialization: { type: String },
   location: { type: String, required: true },
+  role: {
+  type: String,
+  required: true,
+  enum: ['doctor', 'patient']
+}
 }, { timestamps: true });
 
 export default mongoose.model('User', userSchema);

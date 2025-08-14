@@ -7,30 +7,24 @@ const Login = () => {
   const navigate = useNavigate();
   const [credentials, setCredentials] = useState({ email: '', password: '' });
 
-  const handleChange = (e) => {
-    setCredentials((prev) => ({ ...prev, [e.target.name]: e.target.value }));
-  };
+  const handleChange = (e) => setCredentials(prev => ({ ...prev, [e.target.name]: e.target.value }));
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     try {
-      const res = await axios.post('http://localhost:5000/api/auth/login', credentials);
-      const { token, role, name } = res.data;
+      const res = await axios.post(`${'http://localhost:5000'}/api/auth/login`, credentials);
+      const { token, user } = res.data;
 
-      // Save user info to localStorage
+      // save token and user object (id, name, role)
       localStorage.setItem('token', token);
-      localStorage.setItem('user', JSON.stringify({ name, role }));
+      localStorage.setItem('user', JSON.stringify(user));
 
-      alert('Login successful!');
-
-      // Role-based redirect (case-insensitive)
-     
-      if (role === 'doctor') navigate('/doctor/dashboard');
-      else if (role === 'patient') navigate('/patient/dashboard');
-      else  navigate('/patient/dashboard');
+      // role-based redirect
+      if (user.role === 'doctor') navigate('/doctor/dashboard');
+      else navigate('/patient/dashboard');
     } catch (err) {
-      alert('Login failed!');
       console.error(err);
+      alert(err.response?.data?.message || 'Login failed');
     }
   };
 

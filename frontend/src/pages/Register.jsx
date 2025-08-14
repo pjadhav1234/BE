@@ -6,32 +6,22 @@ import { useNavigate } from 'react-router-dom';
 const Register = () => {
   const navigate = useNavigate();
   const [formData, setFormData] = useState({
-    name: '',
-    age: '',
-    email: '',
-    password: '',
-    contact: '',
-    location: '',
-    role: 'patient',
+    name: '', age: '', email: '', password: '', contact: '', location: '', role: '', specialization: ''
   });
 
-  const handleChange = (e) => {
-    setFormData((prev) => ({ ...prev, [e.target.name]: e.target.value }));
-  };
+  const handleChange = (e) => setFormData(prev => ({ ...prev, [e.target.name]: e.target.value }));
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     try {
-      await axios.post('http://localhost:5000/api/auth/register', formData);
-      alert('Registration successful!');
-      navigate('/login'); // Redirect to login, then redirect based on role
-    } catch (error) {
-      alert('Registration failed!');
-      console.error(error);
+      await axios.post(`${'http://localhost:5000'}/api/auth/register`, formData);
+      alert('Registration successful! Please login.');
+      navigate('/login');
+    } catch (err) {
+      console.error(err);
+      alert(err.response?.data?.message || 'Registration failed');
     }
   };
-
-  console.log("Logged-in role:", role);
 
   return (
     <div className="container mt-5">
@@ -45,10 +35,14 @@ const Register = () => {
             <input name="password" type="password" className="form-control mb-2" placeholder="Password" onChange={handleChange} required />
             <input name="contact" className="form-control mb-2" placeholder="Contact" onChange={handleChange} required />
             <input name="location" className="form-control mb-2" placeholder="Location" onChange={handleChange} required />
-            <select name="role" className="form-select mb-3" onChange={handleChange} required>
+            <select name="role" className="form-select mb-2" onChange={handleChange} required>
               <option value="patient">Patient</option>
               <option value="doctor">Doctor</option>
             </select>
+            {/* Show specialization only if doctor selected */}
+            {formData.role === 'doctor' && (
+              <input name="specialization" className="form-control mb-2" placeholder="Specialization" onChange={handleChange} />
+            )}
             <button type="submit" className="btn btn-primary w-100">Register</button>
             <p className="text-center mt-3">
               Already have an account? <a href="/login">Login here</a>

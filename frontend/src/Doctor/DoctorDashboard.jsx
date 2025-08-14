@@ -1,47 +1,25 @@
-import React, { useEffect, useState } from 'react';
-import axios from 'axios';
+// src/Doctor/DoctorDashboard.jsx
+import React from "react";
 
 const DoctorDashboard = () => {
-  const [appointments, setAppointments] = useState([]);
-  const user = JSON.parse(localStorage.getItem('user')); // doctor
-
-  useEffect(() => {
-    const fetchAppointments = async () => {
-      const res = await axios.get('/api/appointments/doctor');
-      setAppointments(res.data);
-    };
-    fetchAppointments();
-  }, []);
-
-  const handleStatus = async (id, status) => {
-    try {
-      await axios.put(`/api/appointments/update`, { status });
-      setAppointments((prev) =>
-        prev.map((a) => (a._id === id ? { ...a, status } : a))
-      );
-    } catch (err) {
-      console.error(err);
-    }
-  };
+  const doctor = JSON.parse(localStorage.getItem("user") || "{}");
 
   return (
-    <div className="container">
-      <h3>Your Appointments</h3>
-      {appointments.map((a) => (
-        <div className="card p-3 mb-2" key={a._id}>
-          <p><strong>Patient ID:</strong> {a.patientId}</p>
-          <p><strong>Date:</strong> {a.date}</p>
-          <p><strong>Time:</strong> {a.time}</p>
-          <p><strong>Symptoms:</strong> {a.symptoms}</p>
-          <p><strong>Status:</strong> {a.status}</p>
-          {a.status === 'Pending' && (
-            <div>
-              <button onClick={() => handleStatus(a._id, 'Accepted')} className="btn btn-success me-2">Accept</button>
-              <button onClick={() => handleStatus(a._id, 'Rejected')} className="btn btn-danger">Reject</button>
-            </div>
-          )}
-        </div>
-      ))}
+    <div className="container mt-4">
+      <h2 className="mb-3">Doctor Dashboard</h2>
+
+      {/* Doctor Info Card */}
+      <div className="card p-4 text-center shadow-sm">
+        <h3 className="text-primary">{doctor.name || "Dr. Unknown"}</h3>
+        <h5 className="text-muted">
+          {doctor.specialization || "General Practitioner"}
+        </h5>
+
+        {/* Inspirational Quote */}
+        <blockquote className="mt-3 fst-italic text-success">
+          "The art of medicine consists of amusing the patient while nature cures the disease."
+        </blockquote>
+      </div>
     </div>
   );
 };

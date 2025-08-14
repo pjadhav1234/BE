@@ -2,12 +2,12 @@
 import { Server } from 'socket.io';
 
 export const initializeSocket = (httpServer) => {
-  const io = new Server(httpServer, {
-    cors: {
-      origin: 'http://localhost:3000',
-      methods: ['GET', 'POST']
-    }
-  });
+ const io = new Server(httpServer, {
+  cors: {
+    origin: 'http://localhost:5173', // or your React port
+    methods: ['GET', 'POST'],
+  },
+});
 
   io.on('connection', (socket) => {
     console.log('User connected:', socket.id);

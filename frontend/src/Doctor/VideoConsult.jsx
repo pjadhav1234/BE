@@ -1,4 +1,14 @@
-import VideoCall from '../components/VideoCall';
 
-// use doctor or patient ID or appointment ID as roomId
-<VideoCall roomId="room-appointment-123" />
+
+// src/Doctor/DoctorVideoCall.jsx
+import React from "react";
+import VideoCall from "../components/VideoCall";
+
+const VideoConsult = () => {
+  return <VideoCall role="doctor" />;
+};
+
+
+
+
+export default VideoConsult;

@@ -1,90 +1,81 @@
-// import React, { useEffect, useRef, useState } from 'react';
-// import { useSearchParams } from 'react-router-dom';
-// import io from 'socket.io-client';
+// src/components/VideoCall.jsx
+import React, { useEffect, useRef, useState } from "react";
+import { useParams } from "react-router-dom";
+import io from "socket.io-client";
 
-// const socket = io('http://localhost:5000');
+const socket = io("http://localhost:5000"); // Backend URL
 
-// const VideoCall = () => {
-//   const [params] = useSearchParams();
-//   const roomName = params.get('room');
+const VideoCall = ({ role }) => {
+  const { id: roomId } = useParams(); // appointment ID as room ID
+  const localVideoRef = useRef();
+  const remoteVideoRef = useRef();
+  const peerConnection = useRef(null);
+  const [connected, setConnected] = useState(false);
 
-//   const localVideoRef = useRef(null);
-//   const remoteVideoRef = useRef(null);
-//   const peerConnection = useRef(null);
-//   const localStream = useRef(null);
+  useEffect(() => {
+    const initCall = async () => {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+      localVideoRef.current.srcObject = stream;
 
-//   useEffect(() => {
-//     const startCall = async () => {
-//       try {
-//         localStream.current = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-//         localVideoRef.current.srcObject = localStream.current;
+      peerConnection.current = new RTCPeerConnection();
+      stream.getTracks().forEach((track) => {
+        peerConnection.current.addTrack(track, stream);
+      });
 
-//         peerConnection.current = new RTCPeerConnection();
+      peerConnection.current.ontrack = (event) => {
+        remoteVideoRef.current.srcObject = event.streams[0];
+      };
 
-//         localStream.current.getTracks().forEach(track => {
-//           peerConnection.current.addTrack(track, localStream.current);
-//         });
+      peerConnection.current.onicecandidate = (event) => {
+        if (event.candidate) {
+          socket.emit("ice-candidate", { roomId, candidate: event.candidate });
+        }
+      };
 
-//         peerConnection.current.ontrack = (event) => {
-//           remoteVideoRef.current.srcObject = event.streams[0];
-//         };
+      socket.emit("join-room", roomId);
 
-//         socket.emit('join-room', roomName);
+      socket.on("user-joined", async () => {
+        if (role === "doctor") {
+          const offer = await peerConnection.current.createOffer();
+          await peerConnection.current.setLocalDescription(offer);
+          socket.emit("offer", { roomId, offer, sender: role });
+        }
+      });
 
-//         socket.on('offer', async (offer) => {
-//           await peerConnection.current.setRemoteDescription(new RTCSessionDescription(offer));
-//           const answer = await peerConnection.current.createAnswer();
-//           await peerConnection.current.setLocalDescription(answer);
-//           socket.emit('answer', { answer, room: roomName });
-//         });
+      socket.on("offer", async (offer) => {
+        await peerConnection.current.setRemoteDescription(new RTCSessionDescription(offer));
+        const answer = await peerConnection.current.createAnswer();
+        await peerConnection.current.setLocalDescription(answer);
+        socket.emit("answer", { roomId, answer });
+      });
 
-//         socket.on('answer', async (answer) => {
-//           await peerConnection.current.setRemoteDescription(new RTCSessionDescription(answer));
-//         });
+      socket.on("answer", async (answer) => {
+        await peerConnection.current.setRemoteDescription(new RTCSessionDescription(answer));
+        setConnected(true);
+      });
 
-//         socket.on('candidate', async (candidate) => {
-//           if (candidate) {
-//             await peerConnection.current.addIceCandidate(new RTCIceCandidate(candidate));
-//           }
-//         });
+      socket.on("ice-candidate", async (candidate) => {
+        try {
+          await peerConnection.current.addIceCandidate(new RTCIceCandidate(candidate));
+        } catch (err) {
+          console.error("Error adding ICE candidate:", err);
+        }
+      });
+    };
 
-//         peerConnection.current.onicecandidate = (event) => {
-//           if (event.candidate) {
-//             socket.emit('candidate', { candidate: event.candidate, room: roomName });
-//           }
-//         };
+    initCall();
+  }, [roomId, role]);
 
-//         const offer = await peerConnection.current.createOffer();
-//         await peerConnection.current.setLocalDescription(offer);
-//         socket.emit('offer', { offer, room: roomName });
-//       } catch (err) {
-//         console.error('Error starting video call:', err);
-//       }
-//     };
+  return (
+    <div className="container mt-4">
+      <h2>{role === "doctor" ? "Doctor Video Call" : "Patient Video Call"}</h2>
+      <div className="d-flex gap-3">
+        <video ref={localVideoRef} autoPlay muted playsInline width="300" className="border" />
+        <video ref={remoteVideoRef} autoPlay playsInline width="300" className="border" />
+      </div>
+      {connected && <p className="text-success mt-3">Connected!</p>}
+    </div>
+  );
+};
 
-//     startCall();
-
-//     return () => {
-//       localStream.current?.getTracks().forEach(track => track.stop());
-//       socket.disconnect();
-//     };
-//   }, [roomName]);
-
-//   return (
-//     <div className="container text-center mt-5">
-//       <h3>Video Consultation</h3>
-//       <div className="row">
-//         <div className="col-md-6">
-//           <h5>Your Video</h5>
-//           <video ref={localVideoRef} autoPlay muted playsInline width="100%" height="300px" />
-//         </div>
-//         <div className="col-md-6">
-//           <h5>Doctor's Video</h5>
-//           <video ref={remoteVideoRef} autoPlay playsInline width="100%" height="300px" />
-//         </div>
-//       </div>
-//     </div>
-//   );
-// };
-
-// export default VideoCall;
+export default VideoCall;

@@ -4,11 +4,14 @@ import { Navigate } from 'react-router-dom';
 
 const ProtectedRoute = ({ children, allowedRole }) => {
   const token = localStorage.getItem('token');
-  const role = localStorage.getItem('role');
+  const userStr = localStorage.getItem('user');
+  const user = userStr ? JSON.parse(userStr) : null;
 
-  if (!token) return <Navigate to="/login" />;
-  if (role !== allowedRole) return <Navigate to={`/${role}-dashboard`} />;
-
+  if (!token || !user) return <Navigate to="/login" />;
+  if (allowedRole && user.role !== allowedRole) {
+    // Redirect to their correct dashboard
+    return <Navigate to={user.role === 'doctor' ? '/doctor/dashboard' : '/patient/dashboard'} />;
+  }
   return children;
 };
 

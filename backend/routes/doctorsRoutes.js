@@ -1,15 +1,17 @@
-// routes/doctorRoutes.js
+// routes/doctorsRoutes.js
 import express from 'express';
-const router = express.Router();
-import Doctor from '../models/User.js'; // adjust path
+import User from '../models/User.js';
 
-// GET /api/doctors/all
-router.get('/all', async (req, res) => {
+const router = express.Router();
+
+// Get all doctors (for patient booking list)
+router.get('/', async (req, res) => {
   try {
-    const doctors = await Doctor.find();
+    const doctors = await User.find({ role: 'doctor' }).select('name specialization contact location');
     res.json(doctors);
   } catch (err) {
-    res.status(500).json({ error: 'Failed to fetch doctors' });
+    console.error(err);
+    res.status(500).json({ message: 'Error fetching doctors' });
   }
 });
 
