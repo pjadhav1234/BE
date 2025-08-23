@@ -1,318 +1,530 @@
-// VideoCall.jsx - Key fixes for WebRTC issues
 import React, { useEffect, useState, useRef } from 'react';
+import io from 'socket.io-client';
 
-const VideoCall = () => {
+const VideoCall = ({ appointmentId, doctorId, patientId, onCallEnd, userRole }) => {
+  const [socket, setSocket] = useState(null);
   const [localStream, setLocalStream] = useState(null);
   const [remoteStream, setRemoteStream] = useState(null);
   const [peerConnection, setPeerConnection] = useState(null);
   const [isCallActive, setIsCallActive] = useState(false);
+  const [isRinging, setIsRinging] = useState(false);
+  const [incomingCall, setIncomingCall] = useState(null);
+  const [callStatus, setCallStatus] = useState('idle');
   const [error, setError] = useState(null);
-  const [deviceError, setDeviceError] = useState(null);
+  const [roomId, setRoomId] = useState(`appointment-${appointmentId}`);
+  const [callDuration, setCallDuration] = useState(0);
+  const [isAudioMuted, setIsAudioMuted] = useState(false);
+  const [isVideoMuted, setIsVideoMuted] = useState(false);
   
   const localVideoRef = useRef(null);
   const remoteVideoRef = useRef(null);
-
-  // Clean up function
-  const cleanup = () => {
-    if (localStream) {
-      localStream.getTracks().forEach(track => {
-        track.stop();
-      });
+  const callTimerRef = useRef(null);
+  
+  const user = JSON.parse(localStorage.getItem('user') || '{}');
+  
+  // Initialize socket connection
+  useEffect(() => {
+    const newSocket = io('http://localhost:5000', {
+      transports: ['websocket', 'polling']
+    });
+    setSocket(newSocket);
+    
+    newSocket.on('connect', () => {
+      console.log('Connected to server with ID:', newSocket.id);
+      
+      // Join the room for this appointment
+      newSocket.emit('join-room', roomId, user.id, user.name, userRole);
+    });
+    
+    // Handle user joined event
+    newSocket.on('user-joined', (userId, userName) => {
+      console.log('User joined:', userName);
+      
+      if (userRole === 'doctor' && callStatus === 'idle') {
+        // Doctor should wait for patient to initiate call
+        setCallStatus('waiting');
+      } else if (userRole === 'patient') {
+        // Patient should initiate call when doctor joins
+        initiateCall();
+      }
+    });
+    
+    // Handle incoming call
+    newSocket.on('incoming-call', (data) => {
+      console.log('Incoming call from:', data.fromUserName);
+      setIncomingCall(data);
+      setIsRinging(true);
+      setCallStatus('ringing');
+    });
+    
+    // Handle call accepted - FIXED: This event doesn't contain an offer
+    newSocket.on('call-accepted', (data) => {
+      console.log('Call accepted by:', data.userName);
+      setCallStatus('connecting');
+      // Doctor has accepted, no need to create answer here
+    });
+    
+    // Handle WebRTC offer
+    newSocket.on('offer', async (data) => {
+      console.log('Received offer from:', data.fromUserName);
+      if (userRole === 'doctor') {
+        await handleOffer(data.offer);
+      }
+    });
+    
+    // Handle WebRTC answer
+    newSocket.on('answer', async (data) => {
+      console.log('Received answer from:', data.fromUserName);
+      if (userRole === 'patient') {
+        await handleAnswer(data.answer);
+      }
+    });
+    
+    // Handle ICE candidate
+    newSocket.on('ice-candidate', async (data) => {
+      console.log('Received ICE candidate');
+      await handleIceCandidate(data.candidate);
+    });
+    
+    // Handle call ended
+    newSocket.on('call-ended', () => {
+      console.log('Call ended by remote user');
+      setCallStatus('ended');
+      cleanup();
+      if (onCallEnd) onCallEnd();
+    });
+    
+    // Handle errors
+    newSocket.on('error', (error) => {
+      console.error('Socket error:', error);
+      setError(error.message);
+    });
+    
+    return () => {
+      newSocket.disconnect();
+    };
+  }, [roomId, userRole]);
+  
+  // Call timer
+  useEffect(() => {
+    if (callStatus === 'connected') {
+      callTimerRef.current = setInterval(() => {
+        setCallDuration(prev => prev + 1);
+      }, 1000);
+    } else {
+      if (callTimerRef.current) {
+        clearInterval(callTimerRef.current);
+        callTimerRef.current = null;
+      }
     }
-    if (peerConnection) {
-      peerConnection.close();
-    }
-    setLocalStream(null);
-    setRemoteStream(null);
-    setPeerConnection(null);
-    setIsCallActive(false);
-  };
-
-  // Initialize media with better error handling
+    
+    return () => {
+      if (callTimerRef.current) {
+        clearInterval(callTimerRef.current);
+      }
+    };
+  }, [callStatus]);
+  
+  // Initialize media stream
   const initializeMedia = async () => {
     try {
-      setError(null);
-      setDeviceError(null);
-
-      // Check if devices are available first
-      const devices = await navigator.mediaDevices.enumerateDevices();
-      const hasVideo = devices.some(device => device.kind === 'videoinput');
-      const hasAudio = devices.some(device => device.kind === 'audioinput');
-
-      if (!hasVideo && !hasAudio) {
-        throw new Error('No camera or microphone found');
-      }
-
-      // Try to get media with fallbacks
-      let constraints = {
-        video: hasVideo,
-        audio: hasAudio
-      };
-
-      let stream;
-      try {
-        // First try with preferred quality
-        stream = await navigator.mediaDevices.getUserMedia({
-          video: hasVideo ? { width: 640, height: 480 } : false,
-          audio: hasAudio ? { 
-            echoCancellation: true,
-            noiseSuppression: true,
-            autoGainControl: true 
-          } : false
-        });
-      } catch (firstError) {
-        console.warn('High quality failed, trying basic constraints:', firstError);
-        // Fallback to basic constraints
-        try {
-          stream = await navigator.mediaDevices.getUserMedia(constraints);
-        } catch (secondError) {
-          // Try audio only
-          if (hasAudio) {
-            console.warn('Video failed, trying audio only:', secondError);
-            stream = await navigator.mediaDevices.getUserMedia({ 
-              video: false, 
-              audio: true 
-            });
-          } else {
-            throw secondError;
-          }
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { width: 640, height: 480 },
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true
         }
-      }
-
+      });
+      
       setLocalStream(stream);
       if (localVideoRef.current) {
         localVideoRef.current.srcObject = stream;
       }
-
+      
       return stream;
     } catch (err) {
       console.error('Error accessing media devices:', err);
-      
-      // Provide specific error messages
-      if (err.name === 'NotReadableError') {
-        setDeviceError('Camera/microphone is being used by another application. Please close other apps using your camera/microphone and try again.');
-      } else if (err.name === 'NotAllowedError') {
-        setDeviceError('Camera/microphone access was denied. Please allow access and refresh the page.');
-      } else if (err.name === 'NotFoundError') {
-        setDeviceError('No camera or microphone found. Please connect a device and try again.');
-      } else if (err.name === 'AbortError') {
-        setDeviceError('Media access was aborted. Please try again.');
-      } else {
-        setDeviceError(`Media access error: ${err.message}`);
-      }
-      
-      setError(err);
+      setError('Failed to access camera/microphone. Please check your permissions.');
       throw err;
     }
   };
-
-  // Create peer connection with consistent configuration
+  
+  // Create peer connection
   const createPeerConnection = () => {
-    const pc = new RTCPeerConnection({
+    const configuration = {
       iceServers: [
         { urls: 'stun:stun.l.google.com:19302' },
         { urls: 'stun:stun1.l.google.com:19302' }
-      ],
-      iceCandidatePoolSize: 10
-    });
-
+      ]
+    };
+    
+    const pc = new RTCPeerConnection(configuration);
+    
+    // Add local stream to connection
+    if (localStream) {
+      localStream.getTracks().forEach(track => {
+        pc.addTrack(track, localStream);
+      });
+    }
+    
     // Handle remote stream
     pc.ontrack = (event) => {
-      console.log('Received remote track');
-      const [remoteStream] = event.streams;
+      console.log('Received remote stream');
+      const remoteStream = event.streams[0];
       setRemoteStream(remoteStream);
       if (remoteVideoRef.current) {
         remoteVideoRef.current.srcObject = remoteStream;
       }
     };
-
+    
+    // Handle ICE candidates
+    pc.onicecandidate = (event) => {
+      if (event.candidate && socket) {
+        socket.emit('ice-candidate', {
+          candidate: event.candidate,
+          roomId: roomId
+        });
+      }
+    };
+    
     // Handle connection state changes
     pc.onconnectionstatechange = () => {
       console.log('Connection state:', pc.connectionState);
-      if (pc.connectionState === 'failed') {
-        setError(new Error('Connection failed'));
+      if (pc.connectionState === 'connected') {
+        setCallStatus('connected');
+        setIsCallActive(true);
+      } else if (pc.connectionState === 'disconnected' || 
+                 pc.connectionState === 'failed') {
+        setCallStatus('ended');
+        cleanup();
       }
     };
-
-    pc.oniceconnectionstatechange = () => {
-      console.log('ICE connection state:', pc.iceConnectionState);
-    };
-
+    
+    setPeerConnection(pc);
     return pc;
   };
-
-  // Create offer with better error handling
-  const createOffer = async (pc, stream) => {
+  
+  // Initiate call (patient)
+  const initiateCall = async () => {
     try {
-      // Add tracks consistently
-      stream.getTracks().forEach(track => {
-        pc.addTrack(track, stream);
-      });
-
-      // Create offer with consistent options
-      const offer = await pc.createOffer({
-        offerToReceiveAudio: true,
-        offerToReceiveVideo: true
-      });
-
-      await pc.setLocalDescription(offer);
-      console.log('Created and set local offer');
-      return offer;
-    } catch (err) {
-      console.error('Error creating offer:', err);
+      setCallStatus('calling');
+      await initializeMedia();
+      const pc = createPeerConnection();
       
-      if (err.name === 'InvalidAccessError') {
-        // Try to recreate the peer connection if SDP order is messed up
-        console.log('SDP order issue detected, recreating peer connection...');
-        pc.close();
-        const newPc = createPeerConnection();
-        
-        // Re-add tracks
-        stream.getTracks().forEach(track => {
-          newPc.addTrack(track, stream);
+      // Send call notification to doctor
+      if (socket) {
+        socket.emit('incoming-call', {
+          roomId: roomId,
+          fromUserId: user.id,
+          fromUserName: user.name,
+          fromUserRole: userRole
         });
-        
-        const newOffer = await newPc.createOffer({
-          offerToReceiveAudio: true,
-          offerToReceiveVideo: true
-        });
-        
-        await newPc.setLocalDescription(newOffer);
-        setPeerConnection(newPc);
-        return newOffer;
       }
       
-      throw err;
-    }
-  };
-
-  // Initialize call with comprehensive error handling
-  const initializeCall = async () => {
-    try {
-      console.log('Initializing call...');
-      
-      // Clean up any existing connections first
-      cleanup();
-      
-      // Get media first
-      const stream = await initializeMedia();
-      
-      // Create peer connection
-      const pc = createPeerConnection();
-      setPeerConnection(pc);
-      
       // Create offer
-      await createOffer(pc, stream);
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
       
-      setIsCallActive(true);
-      console.log('Call initialized successfully');
-      
+      if (socket) {
+        socket.emit('offer', {
+          offer: offer,
+          roomId: roomId,
+          fromUserId: user.id,
+          fromUserName: user.name
+        });
+      }
     } catch (err) {
-      console.error('Error initializing call:', err);
-      setError(err);
-      cleanup();
+      console.error('Error initiating call:', err);
+      setError('Failed to initiate call');
     }
   };
-
-  // Component cleanup
-  useEffect(() => {
-    return () => {
-      cleanup();
-    };
-  }, []);
-
-  // Retry function for device errors
-  const retryMediaAccess = async () => {
-    setDeviceError(null);
-    setError(null);
-    await initializeCall();
+  
+  // Accept incoming call (doctor)
+  const acceptCall = async () => {
+    try {
+      setIsRinging(false);
+      setCallStatus('connecting');
+      await initializeMedia();
+      await createPeerConnection();
+      
+      if (socket) {
+        socket.emit('accept-call', {
+          roomId: roomId,
+          fromUserId: incomingCall.fromUserId
+        });
+      }
+      
+      // After accepting, the doctor will handle the offer when it arrives
+      setIncomingCall(null);
+    } catch (err) {
+      console.error('Error accepting call:', err);
+      setError('Failed to accept call');
+    }
   };
-
+  
+  // Reject incoming call
+  const rejectCall = () => {
+    if (socket) {
+      socket.emit('reject-call', {
+        roomId: roomId,
+        fromUserId: incomingCall.fromUserId
+      });
+    }
+    
+    setIsRinging(false);
+    setIncomingCall(null);
+    setCallStatus('idle');
+  };
+  
+  // Handle WebRTC offer (doctor handles patient's offer)
+  const handleOffer = async (offer) => {
+    try {
+      if (!peerConnection) {
+        await initializeMedia();
+        await createPeerConnection();
+      }
+      
+      await peerConnection.setRemoteDescription(offer);
+      const answer = await peerConnection.createAnswer();
+      await peerConnection.setLocalDescription(answer);
+      
+      if (socket) {
+        socket.emit('answer', {
+          answer: answer,
+          roomId: roomId,
+          fromUserId: user.id,
+          fromUserName: user.name
+        });
+      }
+    } catch (err) {
+      console.error('Error handling offer:', err);
+      setError('Failed to handle call request');
+    }
+  };
+  
+  // Handle WebRTC answer (patient handles doctor's answer)
+  const handleAnswer = async (answer) => {
+    try {
+      if (peerConnection) {
+        await peerConnection.setRemoteDescription(answer);
+      }
+    } catch (err) {
+      console.error('Error handling answer:', err);
+      setError('Failed to establish connection');
+    }
+  };
+  
+  // Handle ICE candidate
+  const handleIceCandidate = async (candidate) => {
+    try {
+      if (peerConnection) {
+        await peerConnection.addIceCandidate(candidate);
+      }
+    } catch (err) {
+      console.error('Error adding ICE candidate:', err);
+    }
+  };
+  
+  // End call
+  const endCall = () => {
+    if (socket) {
+      socket.emit('end-call', { roomId });
+    }
+    setCallStatus('ended');
+    cleanup();
+    if (onCallEnd) onCallEnd();
+  };
+  
+  // Toggle audio
+  const toggleAudio = () => {
+    if (localStream) {
+      const audioTracks = localStream.getAudioTracks();
+      if (audioTracks.length > 0) {
+        audioTracks[0].enabled = !audioTracks[0].enabled;
+        setIsAudioMuted(!audioTracks[0].enabled);
+      }
+    }
+  };
+  
+  // Toggle video
+  const toggleVideo = () => {
+    if (localStream) {
+      const videoTracks = localStream.getVideoTracks();
+      if (videoTracks.length > 0) {
+        videoTracks[0].enabled = !videoTracks[0].enabled;
+        setIsVideoMuted(!videoTracks[0].enabled);
+      }
+    }
+  };
+  
+  // Cleanup function
+  const cleanup = () => {
+    if (localStream) {
+      localStream.getTracks().forEach(track => track.stop());
+    }
+    if (peerConnection) {
+      peerConnection.close();
+    }
+    
+    setLocalStream(null);
+    setRemoteStream(null);
+    setPeerConnection(null);
+    setIsCallActive(false);
+    setCallDuration(0);
+    setIsAudioMuted(false);
+    setIsVideoMuted(false);
+    setIsRinging(false);
+    setIncomingCall(null);
+  };
+  
+  // Format call duration
+  const formatDuration = (seconds) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+  };
+  
   return (
-    <div className="video-call-container">
-      <div className="video-section">
-        <div className="local-video-container">
-          <video
-            ref={localVideoRef}
-            autoPlay
-            muted
-            playsInline
-            className="local-video"
-          />
-          <div className="video-label">You</div>
-        </div>
-
-        <div className="remote-video-container">
-          <video
-            ref={remoteVideoRef}
-            autoPlay
-            playsInline
-            className="remote-video"
-          />
-          <div className="video-label">Remote</div>
-        </div>
-      </div>
-
-      {/* Error Display */}
-      {deviceError && (
-        <div className="alert alert-warning">
-          <div className="d-flex align-items-center">
-            <i className="fas fa-exclamation-triangle me-2"></i>
-            <div className="flex-grow-1">
-              <strong>Device Access Issue:</strong>
-              <div>{deviceError}</div>
+    <div className="video-call-system">
+      {/* Incoming Call Modal */}
+      {isRinging && incomingCall && (
+        <div className="modal show d-block" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}>
+          <div className="modal-dialog modal-dialog-centered">
+            <div className="modal-content">
+              <div className="modal-header">
+                <h5 className="modal-title">Incoming Video Call</h5>
+              </div>
+              <div className="modal-body text-center">
+                <div className="mb-3">
+                  <i className="fas fa-video fa-3x text-primary mb-2"></i>
+                  <h4>{incomingCall.fromUserName}</h4>
+                  <p>is calling you for a video consultation</p>
+                </div>
+                <div className="d-flex gap-2 justify-content-center">
+                  <button className="btn btn-success" onClick={acceptCall}>
+                    <i className="fas fa-phone me-1"></i> Accept
+                  </button>
+                  <button className="btn btn-danger" onClick={rejectCall}>
+                    <i className="fas fa-phone-slash me-1"></i> Decline
+                  </button>
+                </div>
+              </div>
             </div>
-            <button 
-              className="btn btn-sm btn-outline-warning"
-              onClick={retryMediaAccess}
-            >
-              Retry
-            </button>
           </div>
         </div>
       )}
-
-      {error && !deviceError && (
-        <div className="alert alert-danger">
-          <i className="fas fa-times-circle me-2"></i>
-          <strong>Call Error:</strong> {error.message}
+      
+      {/* Video Interface */}
+      <div className="video-interface">
+        <div className="video-container position-relative bg-dark rounded">
+          {/* Remote Video */}
+          <div className="remote-video-container">
+            <video
+              ref={remoteVideoRef}
+              autoPlay
+              playsInline
+              className="remote-video w-100"
+              style={{ 
+                height: '400px', 
+                borderRadius: '8px'
+              }}
+            />
+            {!remoteStream && (
+              <div className="position-absolute top-50 start-50 translate-middle text-center text-white">
+                <i className="fas fa-user fa-3x mb-2"></i>
+                <p>
+                  {callStatus === 'calling' ? 'Calling...' : 
+                   callStatus === 'connecting' ? 'Connecting...' : 
+                   callStatus === 'waiting' ? 'Waiting for participant...' : 
+                   'No video available'}
+                </p>
+              </div>
+            )}
+          </div>
+          
+          {/* Local Video */}
+          {localStream && (
+            <div className="local-video-container position-absolute" style={{ 
+              bottom: '20px', 
+              right: '20px',
+              width: '160px',
+              height: '120px'
+            }}>
+              <video
+                ref={localVideoRef}
+                autoPlay
+                muted
+                playsInline
+                className="local-video w-100 h-100"
+                style={{ 
+                  border: '2px solid white',
+                  borderRadius: '8px'
+                }}
+              />
+            </div>
+          )}
         </div>
-      )}
+        
+        {/* Call Controls */}
+        <div className="call-controls d-flex gap-2 justify-content-center mt-3">
+          {callStatus === 'idle' && userRole === 'patient' && (
+            <button className="btn btn-success" onClick={initiateCall}>
+              <i className="fas fa-video me-1"></i> Start Call
+            </button>
+          )}
+          
+          {(callStatus === 'calling' || callStatus === 'connecting' || callStatus === 'connected') && (
+            <>
+              <button 
+                className={`btn ${isAudioMuted ? 'btn-danger' : 'btn-outline-primary'}`}
+                onClick={toggleAudio}
+                title={isAudioMuted ? 'Unmute Audio' : 'Mute Audio'}
+              >
+                <i className={`fas fa-microphone${isAudioMuted ? '-slash' : ''}`}></i>
+              </button>
 
-      {/* Controls */}
-      <div className="call-controls">
-        {!isCallActive ? (
-          <button 
-            className="btn btn-success btn-lg"
-            onClick={initializeCall}
-            disabled={!!error}
-          >
-            <i className="fas fa-video me-2"></i>
-            Start Call
-          </button>
-        ) : (
-          <button 
-            className="btn btn-danger btn-lg"
-            onClick={cleanup}
-          >
-            <i className="fas fa-phone-slash me-2"></i>
-            End Call
-          </button>
+              <button 
+                className={`btn ${isVideoMuted ? 'btn-danger' : 'btn-outline-primary'}`}
+                onClick={toggleVideo}
+                title={isVideoMuted ? 'Turn On Video' : 'Turn Off Video'}
+              >
+                <i className={`fas fa-video${isVideoMuted ? '-slash' : ''}`}></i>
+              </button>
+
+              <button className="btn btn-danger" onClick={endCall}>
+                <i className="fas fa-phone-slash me-1"></i> End Call
+              </button>
+            </>
+          )}
+        </div>
+        
+        {/* Call Status */}
+        {callStatus !== 'idle' && (
+          <div className="call-status text-center mt-2">
+            <div className={`badge ${
+              callStatus === 'calling' ? 'bg-warning' :
+              callStatus === 'connecting' ? 'bg-info' :
+              callStatus === 'connected' ? 'bg-success' : 
+              callStatus === 'waiting' ? 'bg-secondary' : 'bg-danger'
+            }`}>
+              {callStatus === 'calling' && 'Calling...'}
+              {callStatus === 'connecting' && 'Connecting...'}
+              {callStatus === 'connected' && `Connected - ${formatDuration(callDuration)}`}
+              {callStatus === 'waiting' && 'Waiting for participant...'}
+              {callStatus === 'ended' && 'Call Ended'}
+            </div>
+          </div>
         )}
       </div>
-
-      {/* Instructions */}
-      <div className="mt-3">
-        <small className="text-muted">
-          <strong>Troubleshooting:</strong>
-          <ul>
-            <li>Make sure no other apps are using your camera/microphone</li>
-            <li>Close other browser tabs that might be using media devices</li>
-            <li>Check that your browser has permission to access camera/microphone</li>
-            <li>Try refreshing the page if issues persist</li>
-          </ul>
-        </small>
-      </div>
+      
+      {/* Error Display */}
+      {error && (
+        <div className="alert alert-danger mt-3">
+          <i className="fas fa-exclamation-triangle me-2"></i>
+          {error}
+        </div>
+      )}
     </div>
   );
 };

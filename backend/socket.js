@@ -1,8 +1,11 @@
 // backend/socket.js
 import { Server } from 'socket.io';
 
-export const initializeSocket = (httpServer) => {
-  const io = new Server(httpServer, {
+// Store active rooms and users
+const activeRooms = new Map();
+
+export const initializeSocket = (server) => {
+  const io = new Server(server, {
     cors: {
       origin: [
         'http://localhost:3000',
@@ -11,192 +14,211 @@ export const initializeSocket = (httpServer) => {
         process.env.FRONTEND_URL
       ].filter(Boolean),
       methods: ['GET', 'POST'],
-      credentials: true,
-      allowedHeaders: ['Content-Type', 'Authorization']
+      credentials: true
     }
   });
 
-  // Store active rooms and users
-  const activeRooms = new Map();
-  const userSockets = new Map();
-
   io.on('connection', (socket) => {
-    console.log(`User connected: ${socket.id}`);
+    console.log('User connected:', socket.id);
 
-    // Handle user joining a room
-    socket.on('join-room', (data) => {
-      const { roomId, userRole, userName } = data;
-      
-      socket.join(roomId);
-      socket.roomId = roomId;
-      socket.userRole = userRole;
-      socket.userName = userName;
-
-      // Store user info
-      userSockets.set(socket.id, {
-        roomId,
-        userRole,
-        userName,
-        socketId: socket.id
-      });
-
-      // Update room info
-      if (!activeRooms.has(roomId)) {
-        activeRooms.set(roomId, {
-          participants: [],
-          createdAt: new Date()
+    // Join a room
+    socket.on('join-room', (roomId, userId, userName, userRole) => {
+      try {
+        socket.join(roomId);
+        console.log(`User ${userName} (${userId}) joined room ${roomId}`);
+        
+        // Store user info
+        socket.userId = userId;
+        socket.userName = userName;
+        socket.userRole = userRole;
+        socket.roomId = roomId;
+        
+        // Initialize room if it doesn't exist
+        if (!activeRooms.has(roomId)) {
+          activeRooms.set(roomId, {
+            users: new Map(),
+            callStatus: 'idle'
+          });
+        }
+        
+        const room = activeRooms.get(roomId);
+        room.users.set(userId, {
+          socketId: socket.id,
+          userName,
+          userRole,
+          joinedAt: new Date()
         });
+        
+        // Notify others in the room
+        socket.to(roomId).emit('user-joined', userId, userName);
+        
+        console.log(`Room ${roomId} now has ${room.users.size} users`);
+        
+      } catch (error) {
+        console.error('Error joining room:', error);
+        socket.emit('error', { message: 'Failed to join room' });
       }
+    });
 
-      const room = activeRooms.get(roomId);
-      room.participants.push({
-        socketId: socket.id,
-        userRole,
-        userName,
-        joinedAt: new Date()
-      });
-
-      console.log(`${userName} (${userRole}) joined room ${roomId}`);
-
-      // Notify other users in the room
-      socket.to(roomId).emit('user-joined', {
-        userName,
-        userRole,
-        socketId: socket.id
-      });
-
-      // If there are 2 participants, initiate call
-      if (room.participants.length === 2) {
-        // Let the doctor initiate the call (or first person)
-        const initiator = room.participants.find(p => p.userRole === 'doctor') || room.participants[0];
-        io.to(initiator.socketId).emit('call-offer');
+    // Handle incoming call
+    socket.on('incoming-call', (data) => {
+      try {
+        console.log('Incoming call in room:', data.roomId);
+        const room = activeRooms.get(data.roomId);
+        if (room) {
+          room.callStatus = 'ringing';
+        }
+        socket.to(data.roomId).emit('incoming-call', data);
+      } catch (error) {
+        console.error('Error handling incoming call:', error);
+        socket.emit('error', { message: 'Failed to initiate call' });
       }
+    });
 
-      // Send room info to the joining user
-      socket.emit('room-joined', {
-        roomId,
-        participants: room.participants.filter(p => p.socketId !== socket.id)
-      });
+    // Handle call acceptance
+    socket.on('accept-call', (data) => {
+      try {
+        console.log('Call accepted in room:', data.roomId);
+        const room = activeRooms.get(data.roomId);
+        if (room) {
+          room.callStatus = 'connected';
+        }
+        socket.to(data.roomId).emit('call-accepted', {
+          userId: socket.userId,
+          userName: socket.userName,
+          userRole: socket.userRole
+        });
+      } catch (error) {
+        console.error('Error accepting call:', error);
+        socket.emit('error', { message: 'Failed to accept call' });
+      }
+    });
+
+    // Handle call rejection
+    socket.on('reject-call', (data) => {
+      try {
+        console.log('Call rejected in room:', data.roomId);
+        const room = activeRooms.get(data.roomId);
+        if (room) {
+          room.callStatus = 'ended';
+        }
+        socket.to(data.roomId).emit('call-rejected', {
+          userId: socket.userId,
+          userName: socket.userName
+        });
+      } catch (error) {
+        console.error('Error rejecting call:', error);
+        socket.emit('error', { message: 'Failed to reject call' });
+      }
     });
 
     // Handle WebRTC offer
     socket.on('offer', (data) => {
-      const { offer, roomId } = data;
-      console.log(`Offer received from ${socket.id} for room ${roomId}`);
-      
-      socket.to(roomId).emit('offer', {
-        offer,
-        from: socket.id,
-        userInfo: userSockets.get(socket.id)
-      });
+      try {
+        console.log('Offer received in room:', data.roomId);
+        socket.to(data.roomId).emit('offer', {
+          offer: data.offer,
+          fromUserId: socket.userId,
+          fromUserName: socket.userName
+        });
+      } catch (error) {
+        console.error('Error handling offer:', error);
+        socket.emit('error', { message: 'Failed to send offer' });
+      }
     });
 
     // Handle WebRTC answer
     socket.on('answer', (data) => {
-      const { answer, roomId } = data;
-      console.log(`Answer received from ${socket.id} for room ${roomId}`);
-      
-      socket.to(roomId).emit('answer', {
-        answer,
-        from: socket.id,
-        userInfo: userSockets.get(socket.id)
-      });
+      try {
+        console.log('Answer received in room:', data.roomId);
+        socket.to(data.roomId).emit('answer', {
+          answer: data.answer,
+          fromUserId: socket.userId,
+          fromUserName: socket.userName
+        });
+      } catch (error) {
+        console.error('Error handling answer:', error);
+        socket.emit('error', { message: 'Failed to send answer' });
+      }
     });
 
-    // Handle ICE candidates
+    // Handle ICE candidate
     socket.on('ice-candidate', (data) => {
-      const { candidate, roomId } = data;
-      
-      socket.to(roomId).emit('ice-candidate', {
-        candidate,
-        from: socket.id
-      });
-    });
-
-    // Handle leaving room
-    socket.on('leave-room', (roomId) => {
-      handleUserLeaving(socket, roomId);
-    });
-
-    // Handle chat messages during video call
-    socket.on('chat-message', (data) => {
-      const { message, roomId } = data;
-      const userInfo = userSockets.get(socket.id);
-      
-      socket.to(roomId).emit('chat-message', {
-        message,
-        from: userInfo,
-        timestamp: new Date()
-      });
-    });
-
-    // Handle screen sharing
-    socket.on('screen-share-start', (roomId) => {
-      socket.to(roomId).emit('screen-share-start', {
-        from: socket.id,
-        userInfo: userSockets.get(socket.id)
-      });
-    });
-
-    socket.on('screen-share-stop', (roomId) => {
-      socket.to(roomId).emit('screen-share-stop', {
-        from: socket.id
-      });
-    });
-
-    // Handle disconnection
-    socket.on('disconnect', () => {
-      console.log(`User disconnected: ${socket.id}`);
-      const userInfo = userSockets.get(socket.id);
-      
-      if (userInfo) {
-        handleUserLeaving(socket, userInfo.roomId);
+      try {
+        console.log('ICE candidate received in room:', data.roomId);
+        socket.to(data.roomId).emit('ice-candidate', {
+          candidate: data.candidate,
+          fromUserId: socket.userId
+        });
+      } catch (error) {
+        console.error('Error handling ICE candidate:', error);
+        socket.emit('error', { message: 'Failed to send ICE candidate' });
       }
     });
 
-    // Helper function to handle user leaving
-    function handleUserLeaving(socket, roomId) {
-      if (!roomId) return;
-
-      const userInfo = userSockets.get(socket.id);
-      
-      // Notify other users in the room
-      socket.to(roomId).emit('user-left', {
-        socketId: socket.id,
-        userInfo: userInfo
-      });
-
-      // Update room participants
-      if (activeRooms.has(roomId)) {
-        const room = activeRooms.get(roomId);
-        room.participants = room.participants.filter(p => p.socketId !== socket.id);
-        
-        // If room is empty, delete it
-        if (room.participants.length === 0) {
-          activeRooms.delete(roomId);
-          console.log(`Room ${roomId} deleted - no participants left`);
+    // Handle call end
+    socket.on('end-call', (data) => {
+      try {
+        console.log('Call ended in room:', data.roomId);
+        const room = activeRooms.get(data.roomId);
+        if (room) {
+          room.callStatus = 'ended';
         }
+        socket.to(data.roomId).emit('call-ended');
+      } catch (error) {
+        console.error('Error ending call:', error);
+        socket.emit('error', { message: 'Failed to end call' });
       }
+    });
 
-      // Remove user from tracking
-      userSockets.delete(socket.id);
-      
-      // Leave the socket room
-      socket.leave(roomId);
-      
-      if (userInfo) {
-        console.log(`${userInfo.userName} left room ${roomId}`);
+    // Handle disconnect
+    socket.on('disconnect', () => {
+      try {
+        console.log('User disconnected:', socket.id);
+        
+        if (socket.roomId) {
+          const room = activeRooms.get(socket.roomId);
+          if (room && socket.userId) {
+            room.users.delete(socket.userId);
+            
+            // Clean up room if empty
+            if (room.users.size === 0) {
+              activeRooms.delete(socket.roomId);
+              console.log(`Room ${socket.roomId} cleaned up`);
+            }
+          }
+          
+          socket.to(socket.roomId).emit('user-left', socket.userId, socket.userName);
+        }
+      } catch (error) {
+        console.error('Error handling disconnect:', error);
       }
-    }
-  });
+    });
 
-  // API endpoint to get active rooms (for debugging)
-  io.engine.on('connection_error', (err) => {
-    console.log('Socket connection error:', err.req);
-    console.log('Error code:', err.code);
-    console.log('Error message:', err.message);
-    console.log('Error context:', err.context);
+    // Handle errors
+    socket.on('error', (error) => {
+      console.error('Socket error:', error);
+    });
   });
 
   return io;
+};
+
+// Helper function to get room info
+export const getRoomInfo = (roomId) => {
+  return activeRooms.get(roomId);
+};
+
+// Helper function to get all active rooms
+export const getAllActiveRooms = () => {
+  const rooms = [];
+  activeRooms.forEach((room, roomId) => {
+    rooms.push({
+      roomId,
+      userCount: room.users.size,
+      callStatus: room.callStatus,
+      users: Array.from(room.users.values())
+    });
+  });
+  return rooms;
 };
