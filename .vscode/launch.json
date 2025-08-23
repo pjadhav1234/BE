@@ -1,0 +1,10 @@
+{
+    "configurations": [
+        {
+            "type": "msedge",
+            "name": "http://pjadhav1234/FYP",
+            "request": "launch",
+            "url": "http://pjadhav1234/FYP"
+        }
+    ]
+}

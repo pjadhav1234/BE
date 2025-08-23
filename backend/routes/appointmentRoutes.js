@@ -1,9 +1,9 @@
 // routes/appointmentRoutes.js
 import express from 'express';
+import { protect } from '../middleware/authMiddleware.js';
 
-
-import Appointment from '../models/Appointment.js';
-
+import Appointment from '../models/Appointment.js'
+import {getAcceptedAppointmentsByPatient}  from '../controllers/appointmentController.js'
 const router = express.Router();
 
 // POST /api/appointments/book
@@ -102,6 +102,8 @@ router.get('/patient/:patientId', async (req, res) => {
     res.status(500).json({ message: 'Failed to fetch appointments' });
   }
 });
+
+
 
 
 export default router;

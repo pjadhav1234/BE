@@ -28,3 +28,20 @@ export const getMyAppointments = async (req, res) => {
     res.status(500).json({ message: 'Failed to fetch appointments' });
   }
 };
+
+
+// controllers/appointmentController.js
+export const getAcceptedAppointmentsByPatient = async (req, res) => {
+  try {
+    const appointments = await Appointment.find({
+      patientId: req.user._id, // from token
+      status: "Accepted",
+    }).populate("doctorId", "name speciality");
+
+    res.json(appointments);
+  } catch (err) {
+    console.error("Error fetching accepted appointments:", err);
+    res.status(500).json({ message: "Failed to fetch accepted appointments" });
+  }
+};
+
