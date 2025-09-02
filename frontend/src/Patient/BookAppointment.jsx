@@ -1,4 +1,3 @@
-// src/Patient/BookAppointment.jsx
 import React, { useEffect, useState } from 'react';
 import axios from 'axios';
 
@@ -49,28 +48,34 @@ const BookAppointment = () => {
     setFormVisible(true);
   };
 
-const handleSubmit = async (e) => {
-  e.preventDefault();
-  try {
-    const payload = { ...form, patientId: user.id };
-    const res = await axios.post(`http://localhost:5000/api/appointments`, payload);
-    if (res.status === 201) {
-      alert('Appointment booked successfully!');
-      setForm({ doctorId: '', date: '', time: '', symptoms: '' });
-      setFormVisible(false);
-    }
-  } catch (err) {
-    console.error(err);
-    alert('Failed to book appointment');
-  }
-};
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    try {
+      const payload = { 
+        patientId: user.id,
+        doctorId: form.doctorId,
+        preferredDate: form.date,
+        preferredTime: form.time,
+        symptoms: form.symptoms
+      };
 
+      const res = await axios.post(`http://localhost:5000/api/appointments/book`, payload);
+
+      if (res.status === 201) {
+        alert('Appointment booked successfully!');
+        setForm({ doctorId: '', date: '', time: '', symptoms: '' });
+        setFormVisible(false);
+      }
+    } catch (err) {
+      console.error(err);
+      alert('Failed to book appointment');
+    }
+  };
 
   return (
     <div className="container mt-4">
       <h3>Book Appointment</h3>
 
-      {/* Search bar */}
       <input
         type="text"
         className="form-control mb-3"
@@ -79,7 +84,6 @@ const handleSubmit = async (e) => {
         onChange={(e) => setSearch(e.target.value)}
       />
 
-      {/* Doctor list */}
       <div className="row">
         {filteredDoctors.map(doctor => (
           <div key={doctor._id} className="col-md-4 mb-3">
@@ -99,18 +103,14 @@ const handleSubmit = async (e) => {
         ))}
       </div>
 
-      {/* Booking form */}
       {formVisible && selectedDoctor && (
         <div className="card p-3 mt-4">
           <h5>Booking Appointment with {selectedDoctor.name}</h5>
           <form onSubmit={handleSubmit}>
-            <input
-              type="hidden"
-              value={form.doctorId}
-              readOnly
-            />
+            <input type="hidden" value={form.doctorId} readOnly />
+            
             <div className="mb-2">
-              <label>Available Date</label>
+              <label>Preferred Date</label>
               <input
                 type="date"
                 className="form-control"
@@ -119,8 +119,9 @@ const handleSubmit = async (e) => {
                 required
               />
             </div>
+
             <div className="mb-2">
-              <label>Time</label>
+              <label>Preferred Time</label>
               <input
                 type="time"
                 className="form-control"
@@ -129,6 +130,7 @@ const handleSubmit = async (e) => {
                 required
               />
             </div>
+
             <div className="mb-2">
               <label>Symptoms</label>
               <textarea
@@ -138,6 +140,7 @@ const handleSubmit = async (e) => {
                 onChange={e => setForm({ ...form, symptoms: e.target.value })}
               />
             </div>
+
             <button className="btn btn-success" type="submit">Confirm Appointment</button>
             <button
               type="button"

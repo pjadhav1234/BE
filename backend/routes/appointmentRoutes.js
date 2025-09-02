@@ -6,15 +6,79 @@ import Appointment from '../models/Appointment.js'
 import {getAcceptedAppointmentsByPatient}  from '../controllers/appointmentController.js'
 const router = express.Router();
 
-// POST /api/appointments/book
-router.post('/book', async (req, res) => {
+// ✅ Emergency keywords
+const emergencyKeywords = [
+  "chest pain",
+  "heart attack",
+  "stroke",
+  "unconscious",
+  "severe bleeding",
+  "difficulty breathing",
+  "severe headache",
+  "seizure",
+  "accident",
+  "fracture",
+];
+
+// ---------------------- BOOK APPOINTMENT ----------------------
+router.post("/book", async (req, res) => {
   try {
-    const appointment = new Appointment(req.body);
+    const { patientId, doctorId, preferredDate, preferredTime, symptoms } = req.body;
+
+    if (!patientId || !doctorId || !preferredDate || !preferredTime) {
+      return res.status(400).json({ message: "Missing required fields" });
+    }
+
+    let status = "pending";
+
+    // Check for emergency
+    if (symptoms) {
+      const lowerSymptoms = symptoms.toLowerCase();
+      const isEmergency = emergencyKeywords.some((keyword) =>
+        lowerSymptoms.includes(keyword)
+      );
+      if (isEmergency) {
+        console.log("Emergency detected, SMS sent");
+        // status remains "pending" for doctor scheduling
+      }
+    }
+
+    const appointment = new Appointment({
+      patient: patientId,
+      doctor: doctorId,
+      preferredDate: new Date(preferredDate),
+      preferredTime,
+      symptoms,
+      status,
+    });
+
     await appointment.save();
-    res.status(201).json({ message: 'Appointment booked successfully' });
+    res.status(201).json(appointment);
+
   } catch (error) {
-    console.error('Booking Error:', error);
-    res.status(500).json({ message: 'Failed to book appointment' });
+    console.error("Booking Error:", error);
+    res.status(500).json({ message: "Failed to book appointment", error: error.message });
+  }
+});
+
+
+// ---------------------- GET APPOINTMENTS FOR DOCTOR ----------------------
+router.get("/doctor/:doctorId", async (req, res) => {
+  try {
+    const appointments = await Appointment.find({
+      doctorId: req.params.doctorId,
+    }).populate("patientId", "name email phone");
+
+    // ✅ Sort so Emergency always comes first
+    const sorted = appointments.sort((a, b) =>
+      a.status === "Emergency" ? -1 : b.status === "Emergency" ? 1 : 0
+    );
+
+    res.json(sorted);
+  } catch (err) {
+    res
+      .status(500)
+      .json({ message: "Error fetching appointments", error: err });
   }
 });
 
@@ -29,19 +93,34 @@ router.get("/doctor/:doctorId", async (req, res) => {
   }
 });
 
-// Update appointment status
 router.put("/update/:id", async (req, res) => {
   try {
-    const updated = await Appointment.findByIdAndUpdate(
-      req.params.id,
-      { status: req.body.status },
-      { new: true }
-    );
-    res.json(updated);
+    const { id } = req.params;
+     const { scheduledDate, scheduledTime } = req.body;
+    // Fetch the existing appointment first
+    const appointment = await Appointment.findById(id);
+    if (!appointment) return res.status(404).json({ message: "Appointment not found" });
+
+    appointment.scheduledDate = scheduledDate || appointment.scheduledDate;
+    appointment.scheduledTime = scheduledTime || appointment.scheduledTime;
+   
+       
+    await appointment.save();
+    res.json(appointment);
+
+
+    
+  
   } catch (err) {
-    res.status(500).json({ message: "Error updating status", error: err });
+    console.error("Error updating appointment:", err);
+    res.status(500).json({ message: "Failed to update appointment" });
   }
 });
+
+
+
+
+
 // Create appointment (used by patients)
 router.post('/', async (req, res) => {
   try {
@@ -63,45 +142,47 @@ router.get('/doctor/appointments/:doctorId', async (req, res) => {
   }
 });
 
-// GET /api/appointments/patient/:patientId/accepted
-router.get('/patient/:patientId/accepted', async (req, res) => {
+// ---------------------- GET ACCEPTED APPOINTMENTS (PATIENT) ----------------------
+router.get("/patient/:patientId/accepted", async (req, res) => {
   try {
     const appointments = await Appointment.find({
       patientId: req.params.patientId,
-      status: 'Accepted',
-    }).populate('doctorId', 'name speciality'); // optional: populate doctor info
+      status: "Accepted",
+    }).populate("doctorId", "name speciality");
 
     res.json(appointments);
   } catch (err) {
     console.error(err);
-    res.status(500).json({ message: 'Failed to fetch accepted appointments' });
+    res.status(500).json({ message: "Failed to fetch accepted appointments" });
   }
 });
-// ✅ Get ALL appointments for a specific patient (any status)
-router.get('/patient/:patientId', async (req, res) => {
+
+// ---------------------- GET ALL APPOINTMENTS (PATIENT) ----------------------
+router.get("/patient/:patientId", async (req, res) => {
   try {
     const appointments = await Appointment.find({
-      patientId: req.params.patientId
+      patientId: req.params.patientId,
     })
-      .populate('doctorId', 'name speciality') // add more fields if needed
-      .sort({ date: 1 }); // sort by date ascending
+      .populate("doctorId", "name speciality")
+      .sort({ date: 1 });
 
-    // Format doctor name into each object
-    const formatted = appointments.map(appt => ({
+    const formatted = appointments.map((appt) => ({
       _id: appt._id,
-      doctorName: appt.doctorId?.name || 'Unknown Doctor',
-      speciality: appt.doctorId?.speciality || 'General',
+      doctorName: appt.doctorId?.name || "Unknown Doctor",
+      speciality: appt.doctorId?.speciality || "General",
       date: appt.date,
       time: appt.time,
-      status: appt.status || 'pending'
+      status: appt.status || "Pending",
     }));
 
     res.json(formatted);
   } catch (err) {
-    console.error('Error fetching patient appointments:', err);
-    res.status(500).json({ message: 'Failed to fetch appointments' });
+    console.error("Error fetching patient appointments:", err);
+    res.status(500).json({ message: "Failed to fetch appointments" });
   }
 });
+
+
 
 
 

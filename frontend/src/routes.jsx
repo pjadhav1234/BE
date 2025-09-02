@@ -32,7 +32,8 @@ const AppRouter = () => {
         {/* Patient Routes */}
         <Route path="/patient/appointments" element={<PatientAppointments />} />
         <Route path="/patient/consultations" element={<JoinConsultation />} />
-        
+        <Route path="/doctor/videoCall" element={<VideoCall />} />
+
         {/* Shared Routes */}
         <Route path="/video-call" element={<VideoCall />} />
         <Route path="/appointment-form" element={<AppointmentCard />} />
