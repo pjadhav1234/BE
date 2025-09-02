@@ -1,4 +1,3 @@
-// frontend/src/Patient/JoinConsultation.jsx
 import React, { useEffect, useState } from 'react';
 import axios from 'axios';
 import { useNavigate } from 'react-router-dom';
@@ -24,8 +23,8 @@ const JoinConsultation = () => {
           { headers: { Authorization: `Bearer ${token}` } }
         );
 
-        // Filter only Accepted appointments
-        const acceptedAppointments = (res.data || []).filter(a => a.status === 'Accepted');
+        // Filter only accepted appointments
+        const acceptedAppointments = (res.data || []).filter(a => a.status === 'accepted');
         setAppointments(acceptedAppointments);
       } catch (err) {
         console.error('Error fetching appointments:', err);
@@ -56,16 +55,30 @@ const JoinConsultation = () => {
   };
 
   const getAppointmentDateTime = (appointment) => {
-    const date = new Date(appointment.date);
-    return { date: date.toLocaleDateString(), time: appointment.time || '00:00' };
+    // Use scheduled date/time if available, otherwise use preferred
+    const date = appointment.scheduledDate ? 
+      new Date(appointment.scheduledDate) : 
+      new Date(appointment.preferredDate);
+    const time = appointment.scheduledTime || appointment.preferredTime || '00:00';
+    
+    return { 
+      date: date.toLocaleDateString(), 
+      time: time
+    };
   };
 
   const isAppointmentTime = (appointment) => {
-    if (!appointment?.time) return false;
+    // Check if it's time for the appointment (15 minutes before to 30 minutes after)
+    const scheduledDate = appointment.scheduledDate || appointment.preferredDate;
+    const scheduledTime = appointment.scheduledTime || appointment.preferredTime;
+    
+    if (!scheduledDate || !scheduledTime) return false;
+    
     const now = new Date();
-    const appointmentDate = new Date(appointment.date);
-    const [hours, minutes] = appointment.time.split(':');
+    const appointmentDate = new Date(scheduledDate);
+    const [hours, minutes] = scheduledTime.split(':');
     appointmentDate.setHours(parseInt(hours), parseInt(minutes));
+    
     const diff = now.getTime() - appointmentDate.getTime();
     return diff >= -15 * 60 * 1000 && diff <= 30 * 60 * 1000;
   };
@@ -100,37 +113,68 @@ const JoinConsultation = () => {
   }
 
   const now = new Date();
-  const upcomingAppointments = appointments.filter(a => new Date(a.date) >= now);
-  const pastAppointments = appointments.filter(a => new Date(a.date) < now);
+  const upcomingAppointments = appointments.filter(a => {
+    const appointmentDate = a.scheduledDate || a.preferredDate;
+    return new Date(appointmentDate) >= now;
+  });
+  const pastAppointments = appointments.filter(a => {
+    const appointmentDate = a.scheduledDate || a.preferredDate;
+    return new Date(appointmentDate) < now;
+  });
 
   return (
     <div className="container mt-4">
-      <h2 className="mb-4"><i className="fas fa-video text-primary me-2"></i>Accepted Consultations</h2>
+      <h2 className="mb-4">
+        <i className="fas fa-video text-primary me-2"></i>
+        Accepted Consultations
+      </h2>
 
-      {/* Upcoming */}
-      <h4 className="mb-3">Upcoming Appointments</h4>
-      {upcomingAppointments.length === 0 ? <p>No upcoming accepted appointments.</p> : (
+    
+      {upcomingAppointments.length === 0 ? (
+        <p>No upcoming accepted appointments.</p>
+      ) : (
         <div className="row">
           {upcomingAppointments.map((appointment) => {
             const { date, time } = getAppointmentDateTime(appointment);
             const canJoin = isAppointmentTime(appointment);
+            
             return (
               <div key={appointment._id} className="col-md-6 mb-3">
-                <div className="card shadow-sm border-success">
+                <div className={`card shadow-sm ${appointment.isEmergency ? 'border-danger' : 'border-success'}`}>
                   <div className="card-body">
+                    {appointment.isEmergency && (
+                      <div className="badge bg-danger mb-2">Emergency Appointment</div>
+                    )}
                     <h5>Dr. {appointment.doctorName}</h5>
+                    <p><strong>Specialization:</strong> {appointment.specialization}</p>
                     <p><strong>Date:</strong> {date}</p>
                     <p><strong>Time:</strong> {time}</p>
-                    <p><strong>Status:</strong> {appointment.status}</p>
-                    {canJoin ? (
-                      <button className="btn btn-success" onClick={() => handleStartVideoCall(appointment)}>
-                        Join Video Call
-                      </button>
-                    ) : (
-                      <button className="btn btn-outline-secondary" disabled>
-                        Not Time Yet
-                      </button>
+                    <p><strong>Status:</strong> 
+                      <span className="badge bg-success ms-2">
+                        {appointment.status.toUpperCase()}
+                      </span>
+                    </p>
+                    
+                    {appointment.symptoms && (
+                      <p><strong>Symptoms:</strong> {appointment.symptoms}</p>
                     )}
+                    
+                    <div className="mt-3">
+                      {canJoin ? (
+                        <button 
+                          className="btn btn-success" 
+                          onClick={() => handleStartVideoCall(appointment)}
+                        >
+                          <i className="fas fa-video me-1"></i>
+                          Join Video Call
+                        </button>
+                      ) : (
+                        <button className="btn btn-outline-secondary" disabled>
+                          <i className="fas fa-clock me-1"></i>
+                          Not Time Yet
+                        </button>
+                      )}
+                    </div>
                   </div>
                 </div>
               </div>
@@ -139,19 +183,38 @@ const JoinConsultation = () => {
         </div>
       )}
 
-      {/* Past */}
-      <h4 className="mt-5 mb-3">Past Appointments</h4>
-      {pastAppointments.length === 0 ? <p>No past accepted appointments.</p> : (
+      {/* Past Appointments */}
+      
+      {pastAppointments.length === 0 ? (
+        <p>No past accepted appointments.</p>
+      ) : (
         <div className="list-group">
           {pastAppointments.map((appointment) => {
             const { date, time } = getAppointmentDateTime(appointment);
             return (
               <div key={appointment._id} className="list-group-item d-flex justify-content-between align-items-center">
                 <div>
-                  <strong>Dr. {appointment.doctorName}</strong><br />
+                  <strong>Dr. {appointment.doctorName}</strong>
+                  {appointment.isEmergency && (
+                    <span className="badge bg-danger ms-2">Emergency</span>
+                  )}
+                  <br />
                   <small>{date} at {time}</small>
+                  {appointment.symptoms && (
+                    <>
+                      <br />
+                      <small className="text-muted">Symptoms: {appointment.symptoms}</small>
+                    </>
+                  )}
                 </div>
                 <span className="badge bg-success">Accepted</span>
+                 <button 
+                          className="btn btn-success" 
+                          onClick={() => handleStartVideoCall(appointment)}
+                        >
+                          <i className="fas fa-video me-1"></i>
+                          Join Video Call
+                        </button>
               </div>
             );
           })}
