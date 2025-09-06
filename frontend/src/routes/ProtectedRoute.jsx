@@ -1,17 +1,15 @@
-// src/components/ProtectedRoute.jsx
-import React from 'react';
-import { Navigate } from 'react-router-dom';
+import { Navigate } from "react-router-dom";
 
-const ProtectedRoute = ({ children, allowedRole }) => {
-  const token = localStorage.getItem('token');
-  const userStr = localStorage.getItem('user');
+const ProtectedRoute = ({ children, role }) => {
+  const userStr = localStorage.getItem("user");
   const user = userStr ? JSON.parse(userStr) : null;
 
-  if (!token || !user) return <Navigate to="/login" />;
-  if (allowedRole && user.role !== allowedRole) {
-    // Redirect to their correct dashboard
-    return <Navigate to={user.role === 'doctor' ? '/doctor/dashboard' : '/patient/dashboard'} />;
+  if (!user) return <Navigate to="/login" />;
+
+  if (role && user.role !== role) {
+    return <Navigate to="/login" />;
   }
+
   return children;
 };
 

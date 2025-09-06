@@ -1,6 +1,11 @@
 // frontend/src/services/api.js
 import axios from 'axios';
 
+
+
+const API_URL = "http://localhost:5000/api/speech";
+
+
 // Create axios instance with base configuration
 const api = axios.create({
   baseURL: 'http://localhost:5000/api',
@@ -39,5 +44,16 @@ api.interceptors.response.use(
     return Promise.reject(error);
   }
 );
+
+
+export const uploadAudio = async (audioBlob) => {
+  const formData = new FormData();
+  formData.append("audio", audioBlob, "recording.wav");
+
+  const response = await axios.post(`${API_URL}/convert`, formData, {
+    headers: { "Content-Type": "multipart/form-data" },
+  });
+  return response.data;
+};
 
 export default api;

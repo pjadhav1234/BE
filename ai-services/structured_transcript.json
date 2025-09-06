@@ -1,0 +1,14 @@
+[
+    {
+        "speaker": "Patient",
+        "text": "hello doctor i have a fever"
+    },
+    {
+        "speaker": "Doctor",
+        "text": "hi patient how long had it"
+    },
+    {
+        "speaker": "Patient",
+        "text": "for 2 days"
+    }
+]

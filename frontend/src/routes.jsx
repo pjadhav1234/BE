@@ -1,4 +1,4 @@
-import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
+import { Routes, Route } from 'react-router-dom';
 import Navbar from './components/Navbar';
 import Login from './pages/Login.jsx';
 import Register from './pages/Register.jsx';
@@ -11,10 +11,13 @@ import AppointmentCard from './components/AppointmentCard.jsx';
 import VideoCall from './components/VideoCall.jsx';
 import JoinConsultation from './Patient/JoinConsultation.jsx';
 import DebugAppointments from './components/DebugAppointments.jsx';
+import PatientVideoCall from './Patient/PatientVideoCall.jsx';
+import ProtectedRoute from './routes/ProtectedRoute.jsx';
+
 
 const AppRouter = () => {
   return (
-    <Router>
+    <>
       <Navbar />
       <Routes>
         {/* Auth Routes */}
@@ -27,12 +30,31 @@ const AppRouter = () => {
 
         {/* Doctor Routes */}
         <Route path="/doctor/appointments" element={<DoctorManageAppointments />} />
-        <Route path="/doctor/video-consultations" element={<DoctorVideoConsultation />} />
+        
+
+
+        <Route
+  path="/doctor/videoCall"
+  element={
+    <ProtectedRoute role="doctor">
+      <DoctorVideoConsultation />
+    </ProtectedRoute>
+  }
+/>
+<Route
+  path="/patient/videoCall"
+  element={
+    <ProtectedRoute role="patient">
+      <PatientVideoCall />
+    </ProtectedRoute>
+  }
+/>
+
 
         {/* Patient Routes */}
         <Route path="/patient/appointments" element={<PatientAppointments />} />
         <Route path="/patient/consultations" element={<JoinConsultation />} />
-        <Route path="/doctor/videoCall" element={<VideoCall />} />
+        
 
         {/* Shared Routes */}
         <Route path="/video-call" element={<VideoCall />} />
@@ -45,7 +67,7 @@ const AppRouter = () => {
         <Route path="/" element={<Login />} />
         <Route path="*" element={<Login />} />
       </Routes>
-    </Router>
+    </>
   );
 };
 

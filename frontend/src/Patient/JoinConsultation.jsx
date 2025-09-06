@@ -208,13 +208,17 @@ const JoinConsultation = () => {
                   )}
                 </div>
                 <span className="badge bg-success">Accepted</span>
-                 <button 
-                          className="btn btn-success" 
-                          onClick={() => handleStartVideoCall(appointment)}
-                        >
-                          <i className="fas fa-video me-1"></i>
-                          Join Video Call
-                        </button>
+                 {appointment.status === "accepted" && (
+  <div className="mt-3">
+    <button
+      onClick={() => navigate(`/patient/videoCall?room=${appointment._id}`)}
+      className="btn btn-primary"
+    >
+      Join Video Call
+    </button>
+  </div>
+)}
+
               </div>
             );
           })}
