@@ -1,80 +1,48 @@
-import torch
-import json
-from transformers import pipeline
+import os
+from flask import Flask, request, jsonify
+from flask_cors import CORS
+from prescription import process_transcript_file
 
-# Load zero-shot classification model
-print("⏳ Loading model...")
-classifier = pipeline("zero-shot-classification", model="facebook/bart-large-mnli")
-print("✅ Model loaded successfully!")
+# Initialize Flask app
+app = Flask(__name__)
+CORS(app)  # Allow cross-origin requests (for frontend)
 
-def structure_transcript(raw_transcript):
-    structured = []
-    lines = raw_transcript.split("\n")
-    
-    for line in lines:
-        if not line.strip():
-            continue
-        
-        # Clean line
-        line_clean = line.replace("Doctor:", "").replace("Patient:", "").strip()
-        
-        # Rule-based detection for short lines
-        lower = line_clean.lower()
-        if any(q in lower for q in ["how", "what", "when", "do you", "are you", "can you"]):
-            speaker = "Doctor"
-        else:
-            # Zero-shot fallback
-            result = classifier(f"This sentence is spoken in a doctor-patient conversation: {line_clean}", candidate_labels=["Doctor", "Patient"])
-            speaker = result["labels"][0]
-        
-        structured.append({"speaker": speaker, "text": line.strip()})
-    
-    return structured
+UPLOADS_DIR = os.path.join(os.getcwd(), "backend", "uploads")
+os.makedirs(UPLOADS_DIR, exist_ok=True)
 
+@app.route("/api/upload-transcript", methods=["POST"])
+def upload_transcript():
     """
-    Convert raw transcript to structured Doctor/Patient dialogues
+    API endpoint to upload a raw doctor-patient conversation .txt file
     """
-    structured = []
-    lines = raw_transcript.split("\n")
-    
-    for line in lines:
-        if not line.strip():
-            continue
-        
-        # Zero-shot classify line
-        result = classifier(line, candidate_labels=["Doctor", "Patient"])
-        speaker = result["labels"][0]  # top predicted label
-        
-        structured.append({"speaker": speaker, "text": line.strip()})
-    
-    return structured
+    if "file" not in request.files:
+        return jsonify({"error": "No file provided"}), 400
 
-def save_to_json(structured_transcript, filename="structured_transcript.json"):
-    with open(filename, "w", encoding="utf-8") as f:
-        json.dump(structured_transcript, f, ensure_ascii=False, indent=4)
-    print(f"✅ Structured transcript saved to {filename}")
+    file = request.files["file"]
 
-def main():
-    print("Enter your transcript (line by line, press Enter twice to finish):")
-    raw_lines = []
-    while True:
-        line = input()
-        if line.strip() == "":
-            break
-        raw_lines.append(line)
-    
-    raw_transcript = "\n".join(raw_lines)
-    
-    # Convert to structured form
-    structured_output = structure_transcript(raw_transcript)
-    
-    # Display result
-    print("\nStructured Transcript:")
-    for item in structured_output:
-        print(f"{item['speaker']}: {item['text']}")
-    
-    # Save to JSON
-    save_to_json(structured_output)
+    if file.filename == "":
+        return jsonify({"error": "Empty filename"}), 400
+
+    # Save file in uploads directory
+    filepath = os.path.join(UPLOADS_DIR, file.filename)
+    file.save(filepath)
+
+    try:
+        # Process the file using prescription.py
+        output_path = process_transcript_file(file.filename)
+
+        # Read the structured JSON content
+        with open(output_path, "r", encoding="utf-8") as f:
+            structured_data = f.read()
+
+        return jsonify({
+            "message": "File processed successfully",
+            "structured_json": structured_data
+        })
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 
 if __name__ == "__main__":
-    main()
+    app.run(host="0.0.0.0", port=5000, debug=True)

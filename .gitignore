@@ -1,0 +1,3 @@
+# .gitignore
+gcloud-key.json
+.env
